@@ -99,7 +99,7 @@ class Classifier:
             torch.save(model.state_dict(), output_path)
             print(f"Saved the model to {output_path}")
         
-        self.model = model
+        self.model = modelas
         return model
     
     @staticmethod
@@ -109,7 +109,8 @@ class Classifier:
         
         model = resnet50()
         num_features = model.fc.in_features
-        model.fc = torch.nn.Linear(num_features, int(num_classes))
+        print(f"features{num_features}, classes: {num_classes}")
+        model.fc = torch.nn.Linear(num_features, num_classes)
 
 
         model.load_state_dict(torch.load(model_path))
@@ -119,7 +120,6 @@ class Classifier:
     
     def read_model_form_disc(self, model_path: str) -> None:
         full_path = os.path.join(BASE_DIR, model_path)
-        # full_path = "D:/Coding/resume_projects/IsPizza/backend/models/pizza_model.pth"
         print(f"Reading in the model from {full_path}")
         self.model = Classifier.return_model_from_disc(full_path, self.num_classes)
 
