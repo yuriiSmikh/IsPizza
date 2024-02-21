@@ -1,20 +1,20 @@
 import os
 import sys
+from PIL import Image
 
 import torch
 import torch.nn as nn
-from torch.nn import Module
 import torch.optim as optim
-from torchvision import models
 from torchvision import datasets, transforms
 from torchvision.models import resnet50, ResNet50_Weights
 from torch.utils.data import DataLoader
 
+
 PATH_DATASET = os.path.join(*['dataset', 'pizza_not_pizza'])
-PATH_MODEL = os.path.join(*['models', 'pizza_model.pth'])
+PATH_MODEL = os.path.join(*['models', 'pizza.model'])
 NUM_EPOCHS = 10
 BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
-
+# Model architecture = resnet50
 
 class Classifier:
     
@@ -23,23 +23,19 @@ class Classifier:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.num_classes = None
-        
-
-    @staticmethod
-    def read_dataset_to_loader(path: str) -> tuple[DataLoader, DataLoader]: 
-
-        if not os.path.isdir(path):
-            raise NameError("The provided path doesn't exist.")
-        
-        data_transform = transforms.Compose([
+        self.data_transform = transforms.Compose([
             transforms.Resize((224, 224)),  # Resize images to 224x224
             transforms.ToTensor(),  # Convert images to PyTorch tensors || all the images have to be equal size
             # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize images
         ])
 
-        # TODO:data_transform2 = transforms.ToTensor() test with this transform, aka not normalizing or resizing 
+    @staticmethod
+    def read_dataset_to_loader(path: str, transforms) -> tuple[DataLoader, DataLoader]: 
 
-        dataset = datasets.ImageFolder(root=path, transform=data_transform)
+        if not os.path.isdir(path):
+            raise NameError("The provided path doesn't exist.")
+
+        dataset = datasets.ImageFolder(root=path, transform=transforms)
 
         train_size = int(0.8 * len(dataset))  # 80% of the data for training
         test_size = len(dataset) - train_size  # Remaining 20% for validation
@@ -60,8 +56,10 @@ class Classifier:
         pil_img.show()
 
     def train_model(self, output_path: str | None = None) -> resnet50:
+        if output_path and not os.path.exists(os.path.dirname(output_path)):
+            raise ValueError(f"The output path directory `{os.path.dirname(output_path)}` doesn't exist")
 
-        train_loader, _ = Classifier.read_dataset_to_loader(self.data_path)
+        train_loader, _ = Classifier.read_dataset_to_loader(self.data_path, self.data_transform)
         self.num_classes = len(train_loader.dataset.dataset.classes)
         
         # neural network
@@ -98,8 +96,11 @@ class Classifier:
         if output_path:
             torch.save(model.state_dict(), output_path)
             print(f"Saved the model to {output_path}")
-        
-        self.model = modelas
+            # print("Model's state_dict:")
+            # for param_tensor in model.state_dict():
+            #     print(param_tensor, "\t", model.state_dict()[param_tensor].size())
+                
+        self.model = model
         return model
     
     @staticmethod
@@ -108,10 +109,15 @@ class Classifier:
             raise NameError("The provided path doesn't exist.")
         
         model = resnet50()
-        num_features = model.fc.in_features
-        print(f"features{num_features}, classes: {num_classes}")
-        model.fc = torch.nn.Linear(num_features, num_classes)
 
+        # num_features = model.fc.in_features
+        # print(f"features{num_features}, classes: {num_classes}")
+
+        new_fc_weight = torch.randn(2, 2048)
+        new_fc_bias = torch.randn(2)
+
+        model.fc.weight.data = new_fc_weight
+        model.fc.bias.data = new_fc_bias
 
         model.load_state_dict(torch.load(model_path))
         model.eval()
@@ -121,11 +127,11 @@ class Classifier:
     def read_model_form_disc(self, model_path: str) -> None:
         full_path = os.path.join(BASE_DIR, model_path)
         print(f"Reading in the model from {full_path}")
-        self.model = Classifier.return_model_from_disc(full_path, self.num_classes)
+        self.model = Classifier.return_model_from_disc(full_path, 2)
 
 
     def validate_model(self):
-        _, test_data = Classifier.read_dataset_to_loader(self.data_path)
+        _, test_data = Classifier.read_dataset_to_loader(self.data_path, self.data_transform)
 
         self.model.eval()  # Set the model to evaluation mode
         val_correct = 0
@@ -142,9 +148,28 @@ class Classifier:
         val_accuracy = 100 * val_correct / val_total
         print(f"Validation Accuracy: {val_accuracy:.2f}%")
     
+    def predict_picture(self, img_path: str) -> str:
+        img = Image.open(img_path)
+        img_tensor = self.data_transform(img)
+        img_tensor = img_tensor.unsqueeze(0)
+        img_tensor = img_tensor.to(self.device)
+
+        self.model.eval()
+
+        with torch.no_grad():
+            output = self.model(img_tensor)
+            probabilities = torch.nn.functional.softmax(output, dim=1)  # Apply softmax to get probabilities
+            _, predicted = torch.max(probabilities, 1)  # Get the class index with highest probability
+            predicted_class = str(predicted.item())
+
+        print(img_path, " prediction: ", predicted_class)
+
+        return "Pizza" if predicted_class == "1" else "Not pizza"
 
 if __name__ == "__main__":
     classifier = Classifier(PATH_DATASET)
-    classifier.read_model_form_disc(PATH_MODEL)
-    classifier.validate_model()
-
+    model = classifier.train_model(os.path.join(BASE_DIR, PATH_MODEL))
+    
+    for file in os.listdir(os.path.join(BASE_DIR, "picture_to_predict")):
+        full_path = os.path.join(BASE_DIR, "picture_to_predict", file)
+        print(classifier.predict_picture(full_path))
